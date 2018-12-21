@@ -7,6 +7,7 @@
 #include "division.h"
 #include "create_csr.h"
 #include "core.h"
+#include "measure.h"
 #include "mpi.h"
 #include "omp.h"
 
@@ -44,11 +45,17 @@ static int maxit;
 static int nt;
 static int qa;
 
-static int n_tests[N_OPS];
-
 static int *Rows;
 static int *Part;
 static int N;
+
+int n_tests[N_OPS];
+const char *op_str[N_OPS] = {
+  "dot",
+  "SpMV",
+  "axpby",
+  "solver",
+};
 
 static CSRMatrix A;
 static Vector BB;
@@ -85,12 +92,6 @@ void init(int argc, char **argv) {
     }
   }
 
-  if (i_am_the_master) {
-    printf("Hello, world!\n");
-    printf("Comm size: %d\n", nproc);
-    printf("Comm rank: %d\n", myrank);
-  }
-
   // read command-line arguments
   max_values[X_DIM] = atoi(argv[ARG_NX]);
   max_values[Y_DIM] = atoi(argv[ARG_NY]);
@@ -103,15 +104,29 @@ void init(int argc, char **argv) {
   n_tests[TEST_SPMV]    = atoi(argv[ARG_N_SPMV]);
   n_tests[TEST_AXPBY]   = atoi(argv[ARG_N_AXPBY]);
   n_tests[TEST_SOLVER]  = atoi(argv[ARG_N_SOLVER]);
+  // op_str[TEST_DOT] = "dot";
+  // op_str[TEST_SPMV] = "SpMV";
+  // op_str[TEST_AXPBY] = "axpby";
+  // op_str[TEST_SOLVER] = "solver";
+
+  if (i_am_the_master) {
+    printf("Testing BiCGSTAB solver for a 3D grid domain\n");
+    printf("nx=%d ny=%d nz=%d tol=%lf maxit=%d nt=%d qa=%d\n\n", 
+      max_values[X_DIM], max_values[Y_DIM], max_values[Z_DIM], 
+      tol, maxit, nt, qa);
+    printf("nproc=%d\n", nproc);
+    printf("N   = %d (Nx=%d, Ny=%d, Nz=%d\n", N, 
+      max_values[X_DIM], max_values[Y_DIM], max_values[Z_DIM]);
+    printf("Aij = sin(i+j+1), i != j\n");
+    printf("Aii = 1.1*sum(fabs(Aij))\n");
+    printf("Bi  = sin(i+1)\n");
+    printf("tol = %.10e\n\n", tol);
+  }
 
   // volume of the cube
   N = 1;
   for (int i = 0; i < N_DIMENSIONS; i++) {
     N *= max_values[i];
-  }
-
-  if (i_am_the_master) {
-    printf("Cube: %dx%dx%d\n", max_values[X_DIM], max_values[Y_DIM], max_values[Z_DIM]);
   }
 
   // calculate process grid dimensions
@@ -125,11 +140,6 @@ void init(int argc, char **argv) {
   }
 
   nproc = grid_nproc;
-  
-  if (i_am_the_master) {
-    printf("Division: %dx%dx%d process grid, processes [0..%d]\n", 
-      P[X_DIM], P[Y_DIM], P[Z_DIM], grid_nproc-1);
-  }
 
   // get other grid parameters
   int n_local;  // small cube volume
@@ -146,10 +156,6 @@ void init(int argc, char **argv) {
 
   // initialize the core with three pieces of data (N is the length of Part)
   initialize(A, Rows, Part, N);
-
-  printf("Hi! I am process %d! My coords are [%d, %d, %d]! My cube is %dx%dx%d! I start from %d,%d,%d!\n", myrank, 
-    p[X_DIM], p[Y_DIM], p[Z_DIM], ps[X_DIM], ps[Y_DIM], ps[Z_DIM], 
-    n_start[X_DIM], n_start[Y_DIM], n_start[Z_DIM]);
 
   // prepare vectors for tests
   BB = make_vector(N); // rhs
