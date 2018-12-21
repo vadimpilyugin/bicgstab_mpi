@@ -1,0 +1,11 @@
+main: main.c measure.c division.c create_csr.c algorithm_par.c core.c
+  bgxlc_r -qsmp=omp -o main main.c measure.c division.c create_csr.c algorithm_par.c core.c -lm -O5 
+
+test: test.c division.c create_csr.c algorithm_par.c core.c
+  bgxlc_r -qsmp=omp -o test test.c division.c create_csr.c algorithm_par.c core.c -lm -O5
+
+.PHONY: clean
+clean:
+  rm -f *.o
+  rm -f main
+  rm -f test
