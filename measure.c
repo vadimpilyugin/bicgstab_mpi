@@ -19,22 +19,15 @@
 #define ARG_TOL 4
 #define ARG_MAXIT 5
 #define ARG_NT 6
-#define ARG_QA 7
-#define ARG_N_DOT 8
-#define ARG_N_SPMV 9
-#define ARG_N_AXPBY 10
-#define ARG_N_SOLVER 11
-#define N_ARGS 12
+#define ARG_N_DOT 7
+#define ARG_N_SPMV 8
+#define ARG_N_AXPBY 9
+#define ARG_N_SOLVER 10
+#define N_ARGS 11
 
 #define FAIL_ARGS 1
 #define FAIL_NPROC 2
 #define EXIT_GRID 3
-
-#define TEST_AXPBY 0
-#define TEST_SPMV 1
-#define TEST_DOT 2
-#define TEST_SOLVER 3
-#define N_OPS 4
 
 int myrank, nproc, i_am_the_master;
 MPI_Comm comm_grid;
@@ -42,12 +35,11 @@ MPI_Comm comm_grid;
 static int max_values[N_DIMENSIONS];
 static double tol;
 static int maxit;
-static int nt;
-static int qa;
+int n_threads;
 
 static int *Rows;
 static int *Part;
-static int N;
+int N;
 
 int n_tests[N_OPS];
 const char *op_str[N_OPS] = {
@@ -62,7 +54,7 @@ static Vector BB;
 static Vector XX;
 static Vector YY;
 
-const char *USAGE_S = "Usage: main [NX] [NY] [NZ] [TOL] [MAXIT] [THREADS] [QA] [N_DOT] [N_SPMV] N_AXPBY] [N_SOLVER]";
+const char *USAGE_S = "Usage: main [NX] [NY] [NZ] [TOL] [MAXIT] [THREADS] [N_DOT] [N_SPMV] N_AXPBY] [N_SOLVER]";
 
 static void usage() {
   if (i_am_the_master)
@@ -81,12 +73,16 @@ void init(int argc, char **argv) {
 
   i_am_the_master = myrank == 0;
   if (argc != N_ARGS) {
+    for (int i = 0; i < argc; i++) {
+      fprintf(stderr, "Arg %d: %s, N_ARGS=%d\n", i, argv[i], N_ARGS);
+    }
     usage();
   }
 
   // if nproc is not a power of 2 then exit
-  if (deg_2(nproc) == ERROR) {
+  if (deg_2(nproc) == -1) {
     if (i_am_the_master) {
+      fprintf(stderr, "Nproc=%d\n", nproc);
       fprintf(stderr, "%s\n", "Number of processes is not a power of 2");
       exit(FAIL_NPROC);
     }
@@ -98,35 +94,31 @@ void init(int argc, char **argv) {
   max_values[Z_DIM] = atoi(argv[ARG_NZ]);
   tol               = strtod(argv[ARG_TOL], NULL);
   maxit             = atoi(argv[ARG_MAXIT]);
-  nt                = atoi(argv[ARG_NT]);
-  qa                = atoi(argv[ARG_QA]);
+  n_threads         = atoi(argv[ARG_NT]);
   n_tests[TEST_DOT]     = atoi(argv[ARG_N_DOT]);
   n_tests[TEST_SPMV]    = atoi(argv[ARG_N_SPMV]);
   n_tests[TEST_AXPBY]   = atoi(argv[ARG_N_AXPBY]);
   n_tests[TEST_SOLVER]  = atoi(argv[ARG_N_SOLVER]);
-  // op_str[TEST_DOT] = "dot";
-  // op_str[TEST_SPMV] = "SpMV";
-  // op_str[TEST_AXPBY] = "axpby";
-  // op_str[TEST_SOLVER] = "solver";
+
+  // volume of the cube
+  N = 1;
+  for (int i = 0; i < N_DIMENSIONS; i++) {
+    N *= max_values[i];
+  }
 
   if (i_am_the_master) {
     printf("Testing BiCGSTAB solver for a 3D grid domain\n");
-    printf("nx=%d ny=%d nz=%d tol=%lf maxit=%d nt=%d qa=%d\n\n", 
+    printf("nx=%d ny=%d nz=%d tol=%lf maxit=%d n_threads=%d nproc=%d\n", 
       max_values[X_DIM], max_values[Y_DIM], max_values[Z_DIM], 
-      tol, maxit, nt, qa);
-    printf("nproc=%d\n", nproc);
+      tol, maxit, n_threads, nproc);
+    printf("n_dot=%d n_spmv=%d n_axpby=%d n_solver=%d\n\n", 
+      n_tests[TEST_DOT], n_tests[TEST_SPMV], n_tests[TEST_AXPBY], n_tests[TEST_SOLVER]);
     printf("N   = %d (Nx=%d, Ny=%d, Nz=%d\n", N, 
       max_values[X_DIM], max_values[Y_DIM], max_values[Z_DIM]);
     printf("Aij = sin(i+j+1), i != j\n");
     printf("Aii = 1.1*sum(fabs(Aij))\n");
     printf("Bi  = sin(i+1)\n");
     printf("tol = %.10e\n\n", tol);
-  }
-
-  // volume of the cube
-  N = 1;
-  for (int i = 0; i < N_DIMENSIONS; i++) {
-    N *= max_values[i];
   }
 
   // calculate process grid dimensions
@@ -184,6 +176,10 @@ void fin() {
 
 double test_op(int op_num) {
   double start = MPI_Wtime();
+  if (i_am_the_master)
+    printf("Starting tests for %s (%d): loop %d times\n",
+    op_str[op_num], op_num, n_tests[op_num]);
+
   for (int i = 0; i < n_tests[op_num]; i++) {
     if (op_num == TEST_AXPBY) {
       axpby_par(XX, YY, 1.1, 0.99);
